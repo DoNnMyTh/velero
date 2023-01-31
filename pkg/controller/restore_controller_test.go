@@ -44,8 +44,10 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/metrics"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
+	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	pluginmocks "github.com/vmware-tanzu/velero/pkg/plugin/mocks"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	isv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/item_snapshotter/v1"
+	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v2"
 	pkgrestore "github.com/vmware-tanzu/velero/pkg/restore"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
@@ -286,6 +288,15 @@ func TestProcessQueueItem(t *testing.T) {
 			expectedValidationErrors: []string{"Either a backup or schedule must be specified as a source for the restore, but not both"},
 		},
 		{
+			name:                     "new restore with labelSelector as well as orLabelSelector fails validation",
+			location:                 defaultStorageLocation,
+			restore:                  NewRestore("foo", "bar", "backup-1", "ns-1", "", velerov1api.RestorePhaseNew).LabelSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}}).OrLabelSelector([]*metav1.LabelSelector{{MatchLabels: map[string]string{"a1": "b1"}}, {MatchLabels: map[string]string{"a2": "b2"}}, {MatchLabels: map[string]string{"a3": "b3"}}, {MatchLabels: map[string]string{"a4": "b4"}}}).Result(),
+			backup:                   defaultBackup().StorageLocation("default").Result(),
+			expectedErr:              false,
+			expectedValidationErrors: []string{"encountered labelSelector as well as orLabelSelectors in restore spec, only one can be specified"},
+			expectedPhase:            string(velerov1api.RestorePhaseFailedValidation),
+		},
+		{
 			name:                  "valid restore with schedule name gets executed",
 			location:              defaultStorageLocation,
 			restore:               NewRestore("foo", "bar", "", "ns-1", "", velerov1api.RestorePhaseNew).Schedule("sched-1").Result(),
@@ -505,7 +516,8 @@ func TestProcessQueueItem(t *testing.T) {
 			if test.expectedRestorerCall != nil {
 				backupStore.On("GetBackupContents", test.backup.Name).Return(ioutil.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
 
-				restorer.On("Restore", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(warnings, errors)
+				restorer.On("RestoreWithResolvers", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+					mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(warnings, errors)
 
 				backupStore.On("PutRestoreLog", test.backup.Name, test.restore.Name, mock.Anything).Return(test.putRestoreLogErr)
 
@@ -544,7 +556,8 @@ func TestProcessQueueItem(t *testing.T) {
 			}
 
 			if test.restore != nil {
-				pluginManager.On("GetRestoreItemActions").Return(nil, nil)
+				pluginManager.On("GetRestoreItemActionsV2").Return(nil, nil)
+				pluginManager.On("GetItemSnapshotters").Return([]isv1.ItemSnapshotter{}, nil)
 				pluginManager.On("CleanupClients")
 			}
 
@@ -848,13 +861,27 @@ type fakeRestorer struct {
 
 func (r *fakeRestorer) Restore(
 	info pkgrestore.Request,
-	actions []velero.RestoreItemAction,
+	actions []riav2.RestoreItemAction,
 	snapshotLocationLister listers.VolumeSnapshotLocationLister,
 	volumeSnapshotterGetter pkgrestore.VolumeSnapshotterGetter,
 ) (pkgrestore.Result, pkgrestore.Result) {
 	res := r.Called(info.Log, info.Restore, info.Backup, info.BackupReader, actions)
 
 	r.calledWithArg = *info.Restore
+
+	return res.Get(0).(pkgrestore.Result), res.Get(1).(pkgrestore.Result)
+}
+
+func (r *fakeRestorer) RestoreWithResolvers(req pkgrestore.Request,
+	resolver framework.RestoreItemActionResolverV2,
+	itemSnapshotterResolver framework.ItemSnapshotterResolver,
+	snapshotLocationLister listers.VolumeSnapshotLocationLister,
+	volumeSnapshotterGetter pkgrestore.VolumeSnapshotterGetter,
+) (pkgrestore.Result, pkgrestore.Result) {
+	res := r.Called(req.Log, req.Restore, req.Backup, req.BackupReader, resolver, itemSnapshotterResolver,
+		snapshotLocationLister, volumeSnapshotterGetter)
+
+	r.calledWithArg = *req.Restore
 
 	return res.Get(0).(pkgrestore.Result), res.Get(1).(pkgrestore.Result)
 }

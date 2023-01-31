@@ -4,7 +4,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.3.0
+    controller-gen.kubebuilder.io/version: v0.7.0
   creationTimestamp: null
   name: downloadrequests.velero.io
 spec:
@@ -46,9 +46,13 @@ spec:
                     - BackupLog
                     - BackupContents
                     - BackupVolumeSnapshots
+                    - BackupItemOperations
                     - BackupResourceList
                     - RestoreLog
                     - RestoreResults
+                    - RestoreItemOperations
+                    - CSIBackupVolumeSnapshots
+                    - CSIBackupVolumeSnapshotContents
                     type: string
                   name:
                     description: Name is the name of the kubernetes resource with
@@ -84,8 +88,6 @@ spec:
         type: object
     served: true
     storage: true
-    subresources:
-      status: {}
 status:
   acceptedNames:
     kind: ""

@@ -32,8 +32,15 @@ metadata:
 spec:
   # Schedule is a Cron expression defining when to run the Backup
   schedule: 0 7 * * *
+  # Specifies whether to use OwnerReferences on backups created by this Schedule. 
+  # Notice: if set to true, when schedule is deleted, backups will be deleted too. Optional.
+  useOwnerReferencesInBackup: false
   # Template is the spec that should be used for each backup triggered by this schedule.
   template:
+    # CSISnapshotTimeout specifies the time used to wait for
+    # CSI VolumeSnapshot status turns to ReadyToUse during creation, before
+    # returning error as timeout. The default value is 10 minute.
+    csiSnapshotTimeout: 10m
     # Array of namespaces to include in the scheduled backup. If unspecified, all namespaces are included.
     # Optional.
     includedNamespaces:
@@ -49,7 +56,10 @@ spec:
     # or fully-qualified. Optional.
     excludedResources:
     - storageclasses.storage.k8s.io
-    # Whether or not to include cluster-scoped resources. Valid values are true, false, and
+    orderedResources:
+      pods: mysql/mysql-cluster-replica-0,mysql/mysql-cluster-replica-1,mysql/mysql-cluster-source-0
+      persistentvolumes: pvc-87ae0832-18fd-4f40-a2a4-5ed4242680c4,pvc-63be1bb0-90f5-4629-a7db-b8ce61ee29b3
+    # Whether to include cluster-scoped resources. Valid values are true, false, and
     # null/unset. If true, all cluster-scoped resources are included (subject to included/excluded
     # resources and the label selector). If false, no cluster-scoped resources are included. If unset,
     # all cluster-scoped resources are included if and only if all namespaces are included and there are
@@ -64,7 +74,7 @@ spec:
       matchLabels:
         app: velero
         component: server
-    # Whether or not to snapshot volumes. This only applies to PersistentVolumes for Azure, GCE, and
+    # Whether to snapshot volumes. This only applies to PersistentVolumes for Azure, GCE, and
     # AWS. Valid values are true, false, and null/unset. If unset, Velero performs snapshots as long as
     # a persistent volume provider is configured for Velero.
     snapshotVolumes: null
@@ -78,6 +88,8 @@ spec:
     # a default value of 30 days will be used. The default can be configured on the velero server
     # by passing the flag --default-backup-ttl.
     ttl: 24h0m0s
+    # whether pod volume file system backup should be used for all volumes by default.
+    defaultVolumesToFsBackup: true
     # The labels you want on backup objects, created from this schedule (instead of copying the labels you have on schedule object itself).
     # When this field is set, the labels from the Schedule resource are not copied to the Backup resource.
     metadata:
@@ -131,7 +143,8 @@ spec:
           post:
             # Same content as pre above.
 status:
-  # The current phase of the latest scheduled backup. Valid values are New, FailedValidation, InProgress, Completed, PartiallyFailed, Failed.
+  # The current phase.
+  # Valid values are New, Enabled, FailedValidation.
   phase: ""
   # Date/time of the last backup for a given schedule
   lastBackup:

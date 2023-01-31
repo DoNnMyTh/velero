@@ -21,9 +21,10 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	snapshotv1beta1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1beta1"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
 
 	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	persistence "github.com/vmware-tanzu/velero/pkg/persistence"
 	volume "github.com/vmware-tanzu/velero/pkg/volume"
 )
@@ -274,12 +275,55 @@ func (_m *BackupStore) PutRestoreResults(backup string, restore string, results 
 	return r0
 }
 
-func (_m *BackupStore) GetCSIVolumeSnapshots(backup string) ([]*snapshotv1beta1api.VolumeSnapshot, error) {
+// PutRestoreItemOperations provides a mock function with given fields: backup, restore, restoreItemOperations
+func (_m *BackupStore) PutRestoreItemOperations(backup string, restore string, restoreItemOperations io.Reader) error {
+	ret := _m.Called(backup, restore, restoreItemOperations)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, io.Reader) error); ok {
+		r0 = rf(backup, restore, restoreItemOperations)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PutBackupItemOperations provides a mock function with given fields: backup, backupItemOperations
+func (_m *BackupStore) PutBackupItemOperations(backup string, backupItemOperations io.Reader) error {
+	ret := _m.Called(backup, backupItemOperations)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, io.Reader) error); ok {
+		r0 = rf(backup, backupItemOperations)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+func (_m *BackupStore) GetCSIVolumeSnapshots(backup string) ([]*snapshotv1api.VolumeSnapshot, error) {
 	panic("Not implemented")
 	return nil, nil
 }
 
-func (_m *BackupStore) GetCSIVolumeSnapshotContents(backup string) ([]*snapshotv1beta1api.VolumeSnapshotContent, error) {
+func (_m *BackupStore) GetCSIVolumeSnapshotContents(backup string) ([]*snapshotv1api.VolumeSnapshotContent, error) {
 	panic("Not implemented")
+	return nil, nil
+}
+
+func (_m *BackupStore) GetCSIVolumeSnapshotClasses(backup string) ([]*snapshotv1api.VolumeSnapshotClass, error) {
+	panic("Not implemented")
+	return nil, nil
+}
+
+func (_m *BackupStore) GetBackupItemOperations(name string) ([]*itemoperation.BackupOperation, error) {
+	panic("implement me")
+	return nil, nil
+}
+
+func (_m *BackupStore) GetRestoreItemOperations(name string) ([]*itemoperation.RestoreOperation, error) {
+	panic("implement me")
 	return nil, nil
 }

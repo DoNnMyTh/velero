@@ -29,6 +29,10 @@ metadata:
   namespace: velero
 # Parameters about the backup. Required.
 spec:
+  # CSISnapshotTimeout specifies the time used to wait for
+  # CSI VolumeSnapshot status turns to ReadyToUse during creation, before
+  # returning error as timeout. The default value is 10 minute.
+  csiSnapshotTimeout: 10m
   # Array of namespaces to include in the backup. If unspecified, all namespaces are included.
   # Optional.
   includedNamespaces:
@@ -44,7 +48,13 @@ spec:
   # or fully-qualified. Optional.
   excludedResources:
   - storageclasses.storage.k8s.io
-  # Whether or not to include cluster-scoped resources. Valid values are true, false, and
+  # Order of the resources to be collected during the backup process.  It's a map with key being the plural resource
+  # name, and the value being a list of object names separated by comma.  Each resource name has format "namespace/objectname".
+  # For cluster resources, simply use "objectname". Optional
+  orderedResources:
+    pods: mysql/mysql-cluster-replica-0,mysql/mysql-cluster-replica-1,mysql/mysql-cluster-source-0
+    persistentvolumes: pvc-87ae0832-18fd-4f40-a2a4-5ed4242680c4,pvc-63be1bb0-90f5-4629-a7db-b8ce61ee29b3
+  # Whether to include cluster-scoped resources. Valid values are true, false, and
   # null/unset. If true, all cluster-scoped resources are included (subject to included/excluded
   # resources and the label selector). If false, no cluster-scoped resources are included. If unset,
   # all cluster-scoped resources are included if and only if all namespaces are included and there are
@@ -59,6 +69,13 @@ spec:
     matchLabels:
       app: velero
       component: server
+  # Individual object when matched with any of the label selector specified in the set are to be included in the backup. Optional.
+  # orLabelSelectors as well as labelSelector cannot co-exist, only one of them can be specified in the backup request
+  orLabelSelectors:
+  - matchLabels:
+      app: velero
+  - matchLabels:
+      app: data-protection
   # Whether or not to snapshot volumes. This only applies to PersistentVolumes for Azure, GCE, and
   # AWS. Valid values are true, false, and null/unset. If unset, Velero performs snapshots as long as
   # a persistent volume provider is configured for Velero.
@@ -73,8 +90,8 @@ spec:
   # a default value of 30 days will be used. The default can be configured on the velero server
   # by passing the flag --default-backup-ttl.
   ttl: 24h0m0s
-  # Whether restic should be used to take a backup of all pod volumes by default.
-  defaultVolumesToRestic: true
+  # whether pod volume file system backup should be used for all volumes by default.
+  defaultVolumesToFsBackup: true
   # Actions to perform at different times during a backup. The only hook supported is
   # executing a command in a container in a pod using the pod exec API. Optional.
   hooks:
@@ -128,7 +145,9 @@ status:
   version: 1
   # The date and time when the Backup is eligible for garbage collection.
   expiration: null
-  # The current phase. Valid values are New, FailedValidation, InProgress, Completed, PartiallyFailed, Failed.
+  # The current phase.
+  # Valid values are New, FailedValidation, InProgress, WaitingForPluginOperations,
+  # WaitingForPluginOperationsPartiallyFailed, Completed, PartiallyFailed, Failed.
   phase: ""
   # An array of any validation errors encountered.
   validationErrors: null
@@ -144,5 +163,6 @@ status:
   warnings: 2
   # Number of errors that were logged by the backup.
   errors: 0
-
+  # An error that caused the entire backup to fail.
+  failureReason: ""
 ```

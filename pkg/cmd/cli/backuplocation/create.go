@@ -78,6 +78,7 @@ func NewCreateOptions() *CreateOptions {
 	return &CreateOptions{
 		Credential: flag.NewMap(),
 		Config:     flag.NewMap(),
+		Labels:     flag.NewMap(),
 		AccessMode: flag.NewEnum(
 			string(velerov1api.BackupStorageLocationAccessModeReadWrite),
 			string(velerov1api.BackupStorageLocationAccessModeReadWrite),
@@ -208,10 +209,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 		if err := kbClient.List(context.Background(), locations, &kbclient.ListOptions{Namespace: f.Namespace()}); err != nil {
 			return errors.WithStack(err)
 		}
-		for _, location := range locations.Items {
+		for i, location := range locations.Items {
 			if location.Spec.Default {
 				location.Spec.Default = false
-				if err := kbClient.Update(context.Background(), &location, &kbclient.UpdateOptions{}); err != nil {
+				if err := kbClient.Update(context.Background(), &locations.Items[i], &kbclient.UpdateOptions{}); err != nil {
 					return errors.WithStack(err)
 				}
 				break

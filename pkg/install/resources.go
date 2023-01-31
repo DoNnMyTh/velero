@@ -27,26 +27,39 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	v1crds "github.com/vmware-tanzu/velero/config/crd/v1/crds"
-	v1beta1crds "github.com/vmware-tanzu/velero/config/crd/v1beta1/crds"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 )
 
 var (
-	DefaultVeleroPodCPURequest = "500m"
-	DefaultVeleroPodMemRequest = "128Mi"
-	DefaultVeleroPodCPULimit   = "1000m"
-	DefaultVeleroPodMemLimit   = "512Mi"
-	DefaultResticPodCPURequest = "500m"
-	DefaultResticPodMemRequest = "512Mi"
-	DefaultResticPodCPULimit   = "1000m"
-	DefaultResticPodMemLimit   = "1Gi"
-	DefaultVeleroNamespace     = "velero"
+	DefaultVeleroPodCPURequest    = "500m"
+	DefaultVeleroPodMemRequest    = "128Mi"
+	DefaultVeleroPodCPULimit      = "1000m"
+	DefaultVeleroPodMemLimit      = "512Mi"
+	DefaultNodeAgentPodCPURequest = "500m"
+	DefaultNodeAgentPodMemRequest = "512Mi"
+	DefaultNodeAgentPodCPULimit   = "1000m"
+	DefaultNodeAgentPodMemLimit   = "1Gi"
+	DefaultVeleroNamespace        = "velero"
 )
 
 func Labels() map[string]string {
 	return map[string]string{
 		"component": "velero",
 	}
+}
+
+func podLabels(userLabels ...map[string]string) map[string]string {
+	// Use the default labels as a starting point
+	base := Labels()
+
+	// Merge base labels with user labels to enforce CLI precedence
+	for _, labels := range userLabels {
+		for k, v := range labels {
+			base[k] = v
+		}
+	}
+
+	return base
 }
 
 func podAnnotations(userAnnotations map[string]string) map[string]string {
@@ -196,46 +209,40 @@ func appendUnstructured(list *unstructured.UnstructuredList, obj runtime.Object)
 }
 
 type VeleroOptions struct {
-	Namespace                         string
-	Image                             string
-	ProviderName                      string
-	Bucket                            string
-	Prefix                            string
-	PodAnnotations                    map[string]string
-	ServiceAccountAnnotations         map[string]string
-	VeleroPodResources                corev1.ResourceRequirements
-	ResticPodResources                corev1.ResourceRequirements
-	SecretData                        []byte
-	RestoreOnly                       bool
-	UseRestic                         bool
-	UseVolumeSnapshots                bool
-	BSLConfig                         map[string]string
-	VSLConfig                         map[string]string
-	DefaultResticMaintenanceFrequency time.Duration
-	Plugins                           []string
-	NoDefaultBackupLocation           bool
-	CACertData                        []byte
-	Features                          []string
-	CRDsVersion                       string
-	DefaultVolumesToRestic            bool
+	Namespace                       string
+	Image                           string
+	ProviderName                    string
+	Bucket                          string
+	Prefix                          string
+	PodAnnotations                  map[string]string
+	PodLabels                       map[string]string
+	ServiceAccountAnnotations       map[string]string
+	VeleroPodResources              corev1.ResourceRequirements
+	NodeAgentPodResources           corev1.ResourceRequirements
+	SecretData                      []byte
+	RestoreOnly                     bool
+	UseNodeAgent                    bool
+	UseVolumeSnapshots              bool
+	BSLConfig                       map[string]string
+	VSLConfig                       map[string]string
+	DefaultRepoMaintenanceFrequency time.Duration
+	GarbageCollectionFrequency      time.Duration
+	Plugins                         []string
+	NoDefaultBackupLocation         bool
+	CACertData                      []byte
+	Features                        []string
+	DefaultVolumesToFsBackup        bool
+	UploaderType                    string
 }
 
-func AllCRDs(perferredAPIVersion string) *unstructured.UnstructuredList {
+func AllCRDs() *unstructured.UnstructuredList {
 	resources := new(unstructured.UnstructuredList)
 	// Set the GVK so that the serialization framework outputs the list properly
 	resources.SetGroupVersionKind(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "List"})
 
-	switch perferredAPIVersion {
-	case "v1beta1":
-		for _, crd := range v1beta1crds.CRDs {
-			crd.SetLabels(Labels())
-			appendUnstructured(resources, crd)
-		}
-	case "v1":
-		for _, crd := range v1crds.CRDs {
-			crd.SetLabels(Labels())
-			appendUnstructured(resources, crd)
-		}
+	for _, crd := range v1crds.CRDs {
+		crd.SetLabels(Labels())
+		appendUnstructured(resources, crd)
 	}
 
 	return resources
@@ -244,7 +251,7 @@ func AllCRDs(perferredAPIVersion string) *unstructured.UnstructuredList {
 // AllResources returns a list of all resources necessary to install Velero, in the appropriate order, into a Kubernetes cluster.
 // Items are unstructured, since there are different data types returned.
 func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
-	resources := AllCRDs(o.CRDsVersion)
+	resources := AllCRDs()
 
 	ns := Namespace(o.Namespace)
 	appendUnstructured(resources, ns)
@@ -265,7 +272,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		appendUnstructured(resources, bsl)
 	}
 
-	// A snapshot location may not be desirable for users relying on restic
+	// A snapshot location may not be desirable for users relying on pod volume backup/restore
 	if o.UseVolumeSnapshots {
 		vsl := VolumeSnapshotLocation(o.Namespace, o.ProviderName, o.VSLConfig)
 		appendUnstructured(resources, vsl)
@@ -275,10 +282,13 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 
 	deployOpts := []podTemplateOption{
 		WithAnnotations(o.PodAnnotations),
+		WithLabels(o.PodLabels),
 		WithImage(o.Image),
 		WithResources(o.VeleroPodResources),
 		WithSecret(secretPresent),
-		WithDefaultResticMaintenanceFrequency(o.DefaultResticMaintenanceFrequency),
+		WithDefaultRepoMaintenanceFrequency(o.DefaultRepoMaintenanceFrequency),
+		WithGarbageCollectionFrequency(o.GarbageCollectionFrequency),
+		WithUploaderType(o.UploaderType),
 	}
 
 	if len(o.Features) > 0 {
@@ -293,19 +303,20 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		deployOpts = append(deployOpts, WithPlugins(o.Plugins))
 	}
 
-	if o.DefaultVolumesToRestic {
-		deployOpts = append(deployOpts, WithDefaultVolumesToRestic())
+	if o.DefaultVolumesToFsBackup {
+		deployOpts = append(deployOpts, WithDefaultVolumesToFsBackup())
 	}
 
 	deploy := Deployment(o.Namespace, deployOpts...)
 
 	appendUnstructured(resources, deploy)
 
-	if o.UseRestic {
+	if o.UseNodeAgent {
 		dsOpts := []podTemplateOption{
 			WithAnnotations(o.PodAnnotations),
+			WithLabels(o.PodLabels),
 			WithImage(o.Image),
-			WithResources(o.ResticPodResources),
+			WithResources(o.NodeAgentPodResources),
 			WithSecret(secretPresent),
 		}
 		if len(o.Features) > 0 {

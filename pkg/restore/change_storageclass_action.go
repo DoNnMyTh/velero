@@ -21,12 +21,15 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	storagev1client "k8s.io/client-go/kubernetes/typed/storage/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
+	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
@@ -55,7 +58,7 @@ func NewChangeStorageClassAction(
 // be run for.
 func (a *ChangeStorageClassAction) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{
-		IncludedResources: []string{"persistentvolumeclaims", "persistentvolumes"},
+		IncludedResources: []string{"persistentvolumeclaims", "persistentvolumes", "statefulsets"},
 	}, nil
 }
 
@@ -66,7 +69,7 @@ func (a *ChangeStorageClassAction) Execute(input *velero.RestoreItemActionExecut
 	defer a.logger.Info("Done executing ChangeStorageClassAction")
 
 	a.logger.Debug("Getting plugin config")
-	config, err := getPluginConfig(framework.PluginKindRestoreItemAction, "velero.io/change-storage-class", a.configMapClient)
+	config, err := getPluginConfig(common.PluginKindRestoreItemAction, "velero.io/change-storage-class", a.configMapClient)
 	if err != nil {
 		return nil, err
 	}
@@ -87,33 +90,72 @@ func (a *ChangeStorageClassAction) Execute(input *velero.RestoreItemActionExecut
 		"name":      obj.GetName(),
 	})
 
-	// use the unstructured helpers here since this code is for both PVs and PVCs, and the
-	// field names are the same for both types.
-	storageClass, _, err := unstructured.NestedString(obj.UnstructuredContent(), "spec", "storageClassName")
-	if err != nil {
-		return nil, errors.Wrap(err, "error getting item's spec.storageClassName")
+	// change StatefulSet volumeClaimTemplates storageClassName
+	if obj.GetKind() == "StatefulSet" {
+		sts := new(appsv1.StatefulSet)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), sts); err != nil {
+			return nil, err
+		}
+
+		if len(sts.Spec.VolumeClaimTemplates) > 0 {
+			for index, pvc := range sts.Spec.VolumeClaimTemplates {
+				exists, newStorageClass, err := a.isStorageClassExist(log, pvc.Spec.StorageClassName, config)
+				if err != nil {
+					return nil, err
+				} else if !exists {
+					continue
+				}
+
+				log.Infof("Updating item's storage class name to %s", newStorageClass)
+				sts.Spec.VolumeClaimTemplates[index].Spec.StorageClassName = &newStorageClass
+			}
+
+			newObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(sts)
+			if err != nil {
+				return nil, errors.Wrap(err, "convert obj to StatefulSet failed")
+			}
+			obj.Object = newObj
+		}
+	} else {
+		// use the unstructured helpers here since this code is for both PVs and PVCs, and the
+		// field names are the same for both types.
+		storageClass, _, err := unstructured.NestedString(obj.UnstructuredContent(), "spec", "storageClassName")
+		if err != nil {
+			return nil, errors.Wrap(err, "error getting item's spec.storageClassName")
+		}
+
+		exists, newStorageClass, err := a.isStorageClassExist(log, &storageClass, config)
+		if err != nil {
+			return nil, err
+		} else if !exists {
+			return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
+		}
+
+		log.Infof("Updating item's storage class name to %s", newStorageClass)
+
+		if err := unstructured.SetNestedField(obj.UnstructuredContent(), newStorageClass, "spec", "storageClassName"); err != nil {
+			return nil, errors.Wrap(err, "unable to set item's spec.storageClassName")
+		}
 	}
-	if storageClass == "" {
+	return velero.NewRestoreItemActionExecuteOutput(obj), nil
+}
+
+func (a *ChangeStorageClassAction) isStorageClassExist(log *logrus.Entry, storageClass *string, cm *corev1.ConfigMap) (exists bool, newStorageClass string, err error) {
+	if storageClass == nil || *storageClass == "" {
 		log.Debug("Item has no storage class specified")
-		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
+		return false, "", nil
 	}
 
-	newStorageClass, ok := config.Data[storageClass]
+	newStorageClass, ok := cm.Data[*storageClass]
 	if !ok {
-		log.Debugf("No mapping found for storage class %s", storageClass)
-		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
+		log.Debugf("No mapping found for storage class %s", *storageClass)
+		return false, "", nil
 	}
 
 	// validate that new storage class exists
 	if _, err := a.storageClassClient.Get(context.TODO(), newStorageClass, metav1.GetOptions{}); err != nil {
-		return nil, errors.Wrapf(err, "error getting storage class %s from API", newStorageClass)
+		return false, "", errors.Wrapf(err, "error getting storage class %s from API", newStorageClass)
 	}
 
-	log.Infof("Updating item's storage class name to %s", newStorageClass)
-
-	if err := unstructured.SetNestedField(obj.UnstructuredContent(), newStorageClass, "spec", "storageClassName"); err != nil {
-		return nil, errors.Wrap(err, "unable to set item's spec.storageClassName")
-	}
-
-	return velero.NewRestoreItemActionExecuteOutput(obj), nil
+	return true, newStorageClass, nil
 }

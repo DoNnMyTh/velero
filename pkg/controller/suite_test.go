@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/persistence"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -128,6 +129,13 @@ func (t *testEnvironment) startManager() error {
 func (t *testEnvironment) stop() error {
 	cancel()
 	return env.Stop()
+}
+
+type fakeErrorBackupStoreGetter struct {
+}
+
+func (f *fakeErrorBackupStoreGetter) Get(*velerov1api.BackupStorageLocation, persistence.ObjectStoreGetter, logrus.FieldLogger) (persistence.BackupStore, error) {
+	return nil, fmt.Errorf("some error")
 }
 
 type fakeSingleObjectBackupStoreGetter struct {

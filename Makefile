@@ -82,9 +82,9 @@ see: https://velero.io/docs/main/build-from-source/#making-images-and-updating-v
 endef
 
 # The version of restic binary to be downloaded
-RESTIC_VERSION ?= 0.12.1
+RESTIC_VERSION ?= 0.15.0
 
-CLI_PLATFORMS ?= linux-amd64 linux-arm linux-arm64 darwin-amd64 windows-amd64 linux-ppc64le
+CLI_PLATFORMS ?= linux-amd64 linux-arm linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 linux-ppc64le
 BUILDX_PLATFORMS ?= $(subst -,/,$(ARCH))
 BUILDX_OUTPUT_TYPE ?= docker
 
@@ -112,19 +112,20 @@ GOPROXY ?= https://proxy.golang.org
 # If you want to build all containers, see the 'all-containers' rule.
 all:
 	@$(MAKE) build
-	@$(MAKE) build BIN=velero-restic-restore-helper
+	@$(MAKE) build BIN=velero-restore-helper
 
 build-%:
 	@$(MAKE) --no-print-directory ARCH=$* build
-	@$(MAKE) --no-print-directory ARCH=$* build BIN=velero-restic-restore-helper
+	@$(MAKE) --no-print-directory ARCH=$* build BIN=velero-restore-helper
 
 all-build: $(addprefix build-, $(CLI_PLATFORMS))
 
-all-containers: container-builder-env
+all-containers:
 	@$(MAKE) --no-print-directory container
-	@$(MAKE) --no-print-directory container BIN=velero-restic-restore-helper
+	@$(MAKE) --no-print-directory container BIN=velero-restore-helper
 
 local: build-dirs
+# Add DEBUG=1 to enable debug locally
 	GOOS=$(GOOS) \
 	GOARCH=$(GOARCH) \
 	VERSION=$(VERSION) \
@@ -162,6 +163,7 @@ shell: build-dirs build-env
 	@# under $GOPATH).
 	@docker run \
 		-e GOFLAGS \
+		-e GOPROXY \
 		-i $(TTY) \
 		--rm \
 		-u $$(id -u):$$(id -g) \
@@ -176,20 +178,6 @@ shell: build-dirs build-env
 		$(BUILDER_IMAGE) \
 		/bin/sh $(CMD)
 
-container-builder-env:
-ifneq ($(BUILDX_ENABLED), true)
-	$(error $(BUILDX_ERROR))
-endif
-	@docker buildx build \
-	--target=builder-env \
-	--build-arg=GOPROXY=$(GOPROXY) \
-	--build-arg=PKG=$(PKG) \
-	--build-arg=VERSION=$(VERSION) \
-	--build-arg=GIT_SHA=$(GIT_SHA) \
-	--build-arg=GIT_TREE_STATE=$(GIT_TREE_STATE) \
-	--build-arg=REGISTRY=$(REGISTRY) \
-	-f $(VELERO_DOCKERFILE) .
-
 container:
 ifneq ($(BUILDX_ENABLED), true)
 	$(error $(BUILDX_ERROR))
@@ -198,6 +186,7 @@ endif
 	--output=type=$(BUILDX_OUTPUT_TYPE) \
 	--platform $(BUILDX_PLATFORMS) \
 	$(addprefix -t , $(IMAGE_TAGS)) \
+	--build-arg=GOPROXY=$(GOPROXY) \
 	--build-arg=PKG=$(PKG) \
 	--build-arg=BIN=$(BIN) \
 	--build-arg=VERSION=$(VERSION) \
@@ -207,6 +196,12 @@ endif
 	--build-arg=RESTIC_VERSION=$(RESTIC_VERSION) \
 	-f $(VELERO_DOCKERFILE) .
 	@echo "container: $(IMAGE):$(VERSION)"
+ifeq ($(BUILDX_OUTPUT_TYPE)_$(REGISTRY), registry_velero)
+	docker pull $(IMAGE):$(VERSION)
+	rm -f $(BIN)-$(VERSION).tar
+	docker save $(IMAGE):$(VERSION) -o $(BIN)-$(VERSION).tar
+	gzip -f $(BIN)-$(VERSION).tar
+endif
 
 SKIP_TESTS ?=
 test: build-dirs
@@ -338,9 +333,9 @@ changelog:
 #		PUBLISH=false \
 #		make release
 #
-# To run the release, which will publish a *DRAFT* GitHub release in github.com/vmware-tanzu/velero 
+# To run the release, which will publish a *DRAFT* GitHub release in github.com/vmware-tanzu/velero
 # (you still need to review/publish the GitHub release manually):
-#		GITHUB_TOKEN=your-github-token \ 
+#		GITHUB_TOKEN=your-github-token \
 #		RELEASE_NOTES_FILE=changelogs/CHANGELOG-1.2.md \
 #		PUBLISH=true \
 #		make release
@@ -359,7 +354,7 @@ serve-docs: build-image-hugo
 	-it -p 1313:1313 \
 	$(HUGO_IMAGE) \
 	hugo server --bind=0.0.0.0 --enableGitInfo=false
-# gen-docs generates a new versioned docs directory under site/content/docs. 
+# gen-docs generates a new versioned docs directory under site/content/docs.
 # Please read the documentation in the script for instructions on how to use it.
 gen-docs:
 	@hack/release-tools/gen-docs.sh

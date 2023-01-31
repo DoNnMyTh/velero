@@ -54,14 +54,10 @@ You will need to give your plugin(s) the full name when registering them by call
 Velero supports the following kinds of plugins:
 
 - **Object Store** - persists and retrieves backups, backup logs and restore logs
-- **Item Snapshotter** - creates snapshots for Kubernetes objects during backup and restores the object from snapshots during restore.  ItemSnapshotters
-  are typically used with the [Astrolabe](https://github.com/vmware-tanzu/astrolabe) framework.
+- **Volume Snapshotter** - creates volume snapshots (during backup) and restores volumes from snapshots (during restore)
 - **Backup Item Action** - executes arbitrary logic for individual items prior to storing them in a backup file
 - **Restore Item Action** - executes arbitrary logic for individual items prior to restoring them into a cluster
 - **Delete Item Action** - executes arbitrary logic based on individual items within a backup prior to deleting the backup
-## Deprecated plugin kinds
-- **Volume Snapshotter** - creates volume snapshots (during backup) and restores volumes from snapshots (during restore)  VolumeSnapshotters
-are deprecated and will be replaced with ItemSnapshotter/Astrolabe plugins.
 
 ## Plugin Logging
 
@@ -103,8 +99,7 @@ data:
   # add your configuration data here as key-value pairs
 ```
 
-Then, in your plugin's implementation, you can read this ConfigMap to fetch the necessary configuration. See the [restic restore action][3]
-for an example of this -- in particular, the `getPluginConfig(...)` function.
+Then, in your plugin's implementation, you can read this ConfigMap to fetch the necessary configuration. 
 
 ## Feature Flags
 
@@ -118,4 +113,3 @@ Velero adds the `LD_LIBRARY_PATH` into the list of environment variables to prov
 
 [1]: https://github.com/vmware-tanzu/velero-plugin-example
 [2]: https://github.com/vmware-tanzu/velero/blob/main/pkg/plugin/logger.go
-[3]: https://github.com/vmware-tanzu/velero/blob/main/pkg/restore/restic_restore_action.go

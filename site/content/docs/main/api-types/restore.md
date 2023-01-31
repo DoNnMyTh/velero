@@ -29,8 +29,12 @@ metadata:
   namespace: velero
 # Parameters about the restore. Required.
 spec:
-  # BackupName is the unique name of the Velero backup to restore from.
+  # The unique name of the Velero backup to restore from.
   backupName: a-very-special-backup
+  # The unique name of the Velero schedule
+  # to restore from. If specified, and BackupName is empty, Velero will
+  # restore from the most recent successful backup created from this schedule.
+  scheduleName: my-scheduled-backup-name
   # Array of namespaces to include in the restore. If unspecified, all namespaces are included.
   # Optional.
   includedNamespaces:
@@ -46,6 +50,21 @@ spec:
   # or fully-qualified. Optional.
   excludedResources:
   - storageclasses.storage.k8s.io
+
+  # restoreStatus selects resources to restore not only the specification, but
+  # the status of the manifest. This is specially useful for CRDs that maintain
+  # external references. By default, it excludes all resources.
+  restoreStatus:
+    # Array of resources to include in the restore status. Just like above,
+    # resources may be shortcuts (for example 'po' for 'pods') or fully-qualified.
+    # If unspecified, no resources are included. Optional.
+    includedResources:
+    - workflows
+    # Array of resources to exclude from the restore status. Resources may be
+    # shortcuts (for example 'po' for 'pods') or fully-qualified.
+    # If unspecified, all resources are excluded. Optional.
+    excludedResources: []
+
   # Whether or not to include cluster-scoped resources. Valid values are true, false, and
   # null/unset. If true, all cluster-scoped resources are included (subject to included/excluded
   # resources and the label selector). If false, no cluster-scoped resources are included. If unset,
@@ -61,18 +80,27 @@ spec:
     matchLabels:
       app: velero
       component: server
-  # NamespaceMapping is a map of source namespace names to
+  # Individual object when matched with any of the label selector specified in the set are to be included in the restore. Optional.
+  # orLabelSelectors as well as labelSelector cannot co-exist, only one of them can be specified in the restore request
+  orLabelSelectors:
+  - matchLabels:
+      app: velero
+  - matchLabels:
+      app: data-protection
+  # namespaceMapping is a map of source namespace names to
   # target namespace names to restore into. Any source namespaces not
   # included in the map will be restored into namespaces of the same name.
   namespaceMapping:
     namespace-backup-from: namespace-to-restore-to
-  # RestorePVs specifies whether to restore all included PVs
-  # from snapshot (via the cloudprovider).
+  # restorePVs specifies whether to restore all included PVs
+  # from snapshot (via the cloudprovider). Optional
   restorePVs: true
-  # ScheduleName is the unique name of the Velero schedule
-  # to restore from. If specified, and BackupName is empty, Velero will
-  # restore from the most recent successful backup created from this schedule.
-  scheduleName: my-scheduled-backup-name
+  # preserveNodePorts specifies whether to restore old nodePorts from backup,
+  # so that the exposed port numbers on the node will remain the same after restore. Optional
+  preserveNodePorts: true
+  # existingResourcePolicy specifies the restore behaviour
+  # for the kubernetes resource to be restored. Optional
+  existingResourcePolicy: none
   # Actions to perform during or post restore. The only hooks currently supported are
   # adding an init container to a pod before it can be restored and executing a command in a
   # restored pod's container. Optional.
@@ -88,8 +116,8 @@ spec:
       # Array of namespaces to which this hook does not apply. Optional.
       excludedNamespaces:
       - ns3
-      # Array of resources to which this hook applies. The only resource supported at this time is
-      # pods.
+      # Array of resources to which this hook applies. If unspecified, the hook applies to all resources in the backup. Optional.
+      # The only resource supported at this time is pods.
       includedResources:
       - pods
       # Array of resources to which this hook does not apply. Optional.
@@ -151,7 +179,9 @@ spec:
           onError: Continue
 # RestoreStatus captures the current status of a Velero restore. Users should not set any data here.
 status:
-  # The current phase. Valid values are New, FailedValidation, InProgress, Completed, PartiallyFailed, Failed.
+  # The current phase.
+  # Valid values are New, FailedValidation, InProgress, WaitingForPluginOperations,
+  # WaitingForPluginOperationsPartiallyFailed, Completed, PartiallyFailed, Failed.
   phase: ""
   # An array of any validation errors encountered.
   validationErrors: null
